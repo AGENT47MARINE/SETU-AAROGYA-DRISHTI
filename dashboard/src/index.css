@@ -1,0 +1,111 @@
+:root {
+  --primary: #00f2fe;
+  --primary-glow: rgba(0, 242, 254, 0.5);
+  --secondary: #4facfe;
+  --bg-dark: #0a0b10;
+  --bg-card: #161b22;
+  --text-main: #e6edf3;
+  --text-muted: #8b949e;
+  --danger: #ff4b2b;
+  --success: #00d2ff;
+  --glass: rgba(255, 255, 255, 0.05);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  overflow: hidden;
+}
+
+.dashboard-container {
+  display: grid;
+  grid-template-columns: 350px 1fr;
+  grid-template-rows: 70px 1fr;
+  height: 100vh;
+}
+
+header {
+  grid-column: 1 / -1;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--glass);
+  display: flex;
+  align-items: center;
+  padding: 0 2rem;
+  justify-content: space-between;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+
+.logo {
+  font-size: 1.5rem;
+  font-weight: 800;
+  background: linear-gradient(to right, var(--primary), var(--secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -1px;
+}
+
+.sidebar {
+  background: var(--bg-card);
+  border-right: 1px solid var(--glass);
+  padding: 1.5rem;
+  overflow-y: auto;
+}
+
+.main-map {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.card {
+  background: var(--glass);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 1.2rem;
+  margin-bottom: 1rem;
+  backdrop-filter: blur(10px);
+  transition: transform 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+}
+
+.signal-item {
+  border-left: 3px solid var(--primary);
+  padding-left: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.signal-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+}
+
+.entity-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(0, 242, 254, 0.1);
+  color: var(--primary);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  margin-right: 5px;
+  margin-top: 5px;
+  text-transform: uppercase;
+}
+
+/* Leaflet Overrides */
+.leaflet-container {
+  background: var(--bg-dark) !important;
+}
+
+.custom-popup .leaflet-popup-content-wrapper {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--primary);
+}
