@@ -1,0 +1,36 @@
+# Core NLP
+fasttext
+indic-nlp-library
+transformers
+torch
+torchvision
+torchaudio
+bitsandbytes
+thefuzz
+python-levenshtein
+polyglot
+pyicu
+pycld2
+
+# Data & Messaging
+psycopg2-binary
+kafka-python
+redis
+httpx
+minio
+
+# Statistics & Math
+numpy
+scipy
+pandas
+shapely
+
+# API & CLI
+fastapi
+uvicorn
+python-dotenv
+requests
+reportlab
+pytest
+locust
+praw

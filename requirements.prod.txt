@@ -1,0 +1,13 @@
+thefuzz
+python-levenshtein
+langdetect
+psycopg2-binary
+kafka-python
+redis
+httpx
+fastapi
+uvicorn
+python-dotenv
+requests
+shapely
+praw

@@ -1,0 +1,26 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    cmake \
+    python3-dev \
+    libpq-dev \
+    libicu-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install
+COPY requirements.txt .
+COPY requirements.prod.txt .
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.prod.txt
+
+# Copy source code
+COPY . .
+
+# Default command (can be overridden in docker-compose)
+CMD ["python", "api/main.py"]

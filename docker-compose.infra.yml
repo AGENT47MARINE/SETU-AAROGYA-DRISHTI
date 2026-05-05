@@ -1,0 +1,42 @@
+services:
+  db:
+    image: timescale/timescaledb-ha:pg15
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - setu-db-data:/var/lib/postgresql/data
+    networks:
+      - setu-net
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - setu-net
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    volumes:
+      - setu-minio-data:/data
+    networks:
+      - setu-net
+
+networks:
+  setu-net:
+    driver: bridge
+
+volumes:
+  setu-db-data:
+  setu-minio-data:

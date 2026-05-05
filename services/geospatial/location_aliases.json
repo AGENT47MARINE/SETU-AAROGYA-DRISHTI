@@ -1,0 +1,25 @@
+{
+  "district_aliases": {
+    "bangalore": "bengaluru urban",
+    "bombay": "mumbai",
+    "madras": "chennai",
+    "calcutta": "kolkata",
+    "trivandrum": "thiruvananthapuram",
+    "gurgaon": "gurugram",
+    "baroda": "vadodara",
+    "allahabad": "prayagraj",
+    "orissa": "odisha",
+    "pondicherry": "puducherry"
+  },
+  "state_aliases": {
+    "up": "uttar pradesh",
+    "mp": "madhya pradesh",
+    "tn": "tamil nadu",
+    "wb": "west bengal",
+    "odisa": "odisha",
+    "orissa": "odisha",
+    "j k": "jammu and kashmir",
+    "jk": "jammu and kashmir",
+    "nct delhi": "delhi"
+  }
+}
