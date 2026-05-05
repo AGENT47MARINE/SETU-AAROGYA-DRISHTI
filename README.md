@@ -41,6 +41,7 @@ Next steps:
    ```
    Notes:
    - `seed_districts.py` reads `DISTRICTS_GEOJSON_URL` (defaults to an India district GeoJSON).
+   - Local-first loading is enabled via `DISTRICTS_GEOJSON_LOCAL_PATH` (default: `data/india_districts.geojson`).
    - Re-run `init_db.py` once after pulling latest changes to apply the district uniqueness index.
 3. Start NLP processor (Kafka -> NLP -> Postgres):
    ```bash
@@ -75,11 +76,27 @@ Next steps:
   - Basic in-memory rate limit (`RATE_LIMIT_PER_MIN`)
   - `/healthz` and `/readyz` endpoints for liveness/readiness checks
   - `/api/ingestion-status` for throughput + geo-mapping + DLQ telemetry
+  - `/api/triage/queue` and `/api/triage/{id}/decision` for human review workflow
+  - `/api/geo-review/queue` for unresolved location review
+  - `/api/stats/advanced` for ADR and temporal statistical provenance
 - NLP processor now sends failed records to DLQ topic `raw_posts_dlq`.
 - Posts are deduplicated by `(platform, post_id_hash)` at DB level.
 - Geo mapping supports alias + fuzzy matching via:
   - `services/geospatial/location_aliases.json`
   - `DISTRICT_FUZZY_THRESHOLD` env (default `92`)
+
+## Statistical Engine (Phase B)
+
+- `services/alerts/alert_manager.py` now generates:
+  - `TEMPORAL_SPIKE` alerts from count thresholds
+  - `TEMPORAL_SPIKE_ZSCORE` alerts from rolling z-score spikes
+  - `ADR_SIGNAL` alerts from PRR/ROR/IC disproportionality screening
+- Statistical helpers:
+  - `services/stats/adr_metrics.py`
+  - `services/stats/temporal.py`
+- Demo backfill utility:
+  - `python scripts/backfill_stats_alerts.py`
+  - Inserts historical ADR/temporal statistical alerts for showcase datasets.
 
 ### Launch shared stack (beta)
 ```bash

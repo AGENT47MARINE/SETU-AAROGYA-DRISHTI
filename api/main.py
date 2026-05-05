@@ -7,6 +7,8 @@ from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 import redis
 import time
+import hashlib
+import json
 
 load_dotenv()
 
@@ -52,6 +54,25 @@ def get_db():
         yield conn
     finally:
         conn.close()
+
+
+def _write_audit_chain(db_conn, alert_id: str, actor: str, action: str, payload: dict):
+    payload_str = json.dumps(payload, sort_keys=True)
+    payload_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+    cursor = db_conn.cursor()
+    cursor.execute(
+        "SELECT chain_hash FROM audit_log ORDER BY created_at DESC LIMIT 1"
+    )
+    prev = cursor.fetchone()
+    prev_hash = prev["chain_hash"] if prev and prev.get("chain_hash") else "GENESIS"
+    chain_hash = hashlib.sha256(f"{prev_hash}:{payload_hash}:{action}:{actor}".encode("utf-8")).hexdigest()
+    cursor.execute(
+        """
+        INSERT INTO audit_log (alert_id, actor, action, payload_hash, prev_hash, chain_hash)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (alert_id, actor, action, payload_hash, prev_hash, chain_hash)
+    )
 
 @app.get("/healthz")
 def healthz():
@@ -141,6 +162,29 @@ def get_stats(request: Request, _=Depends(require_api_key), db = Depends(get_db)
         "total_signals": total_signals,
         "entity_breakdown": entities
     }
+
+
+@app.get("/api/stats/advanced")
+def get_advanced_stats(request: Request, _=Depends(require_api_key), db=Depends(get_db)):
+    enforce_rate_limit(request)
+    cursor = db.cursor()
+    cursor.execute(
+        """
+        SELECT id, alert_type, severity, confidence, payload, created_at
+        FROM alerts
+        WHERE alert_type IN ('ADR_SIGNAL', 'TEMPORAL_SPIKE_ZSCORE', 'TEMPORAL_SPIKE')
+        ORDER BY created_at DESC
+        LIMIT 100
+        """
+    )
+    rows = cursor.fetchall()
+    summary = {"adr_signals": 0, "temporal_spikes": 0}
+    for r in rows:
+        if r["alert_type"] == "ADR_SIGNAL":
+            summary["adr_signals"] += 1
+        else:
+            summary["temporal_spikes"] += 1
+    return {"summary": summary, "alerts": rows}
 
 @app.get("/api/hotspots")
 def get_hotspots(request: Request, _=Depends(require_api_key), db = Depends(get_db)):
@@ -270,6 +314,83 @@ def get_ingestion_status(request: Request, _=Depends(require_api_key), db = Depe
         "dlq_total": dlq_total,
         "dlq_recent_buffer_size": dlq_recent
     }
+
+
+@app.get("/api/triage/queue")
+def get_triage_queue(request: Request, limit: int = 50, _=Depends(require_api_key), db=Depends(get_db)):
+    enforce_rate_limit(request)
+    limit = max(1, min(limit, 200))
+    cursor = db.cursor()
+    cursor.execute(
+        """
+        SELECT id, alert_type, severity, status, payload, confidence, assigned_to, created_at
+        FROM alerts
+        WHERE status = 'PENDING_REVIEW'
+        ORDER BY created_at DESC
+        LIMIT %s
+        """,
+        (limit,)
+    )
+    return cursor.fetchall()
+
+
+@app.post("/api/triage/{alert_id}/decision")
+def post_triage_decision(
+    alert_id: str,
+    request: Request,
+    body: dict,
+    _=Depends(require_api_key),
+    db=Depends(get_db)
+):
+    enforce_rate_limit(request)
+    decision = str(body.get("decision", "")).upper().strip()
+    reviewer = str(body.get("reviewer", "system")).strip()
+    notes = str(body.get("notes", "")).strip()
+    if decision not in {"CONFIRMED", "REJECTED", "MORE_DATA"}:
+        raise HTTPException(status_code=400, detail="decision must be CONFIRMED, REJECTED, or MORE_DATA")
+
+    cursor = db.cursor()
+    cursor.execute("SELECT id, status, payload FROM alerts WHERE id = %s", (alert_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="alert not found")
+
+    new_status = "CONFIRMED" if decision == "CONFIRMED" else ("REJECTED" if decision == "REJECTED" else "NEEDS_MORE_DATA")
+    cursor.execute(
+        """
+        UPDATE alerts
+        SET status = %s, reviewed_at = NOW(), decision = %s, decision_notes = %s, assigned_to = %s
+        WHERE id = %s
+        """,
+        (new_status, decision, notes, reviewer, alert_id)
+    )
+    _write_audit_chain(
+        db,
+        alert_id=alert_id,
+        actor=reviewer,
+        action=f"TRIAGE_{decision}",
+        payload={"decision": decision, "notes": notes, "alert_payload": row.get("payload")}
+    )
+    db.commit()
+    return {"ok": True, "alert_id": alert_id, "status": new_status}
+
+
+@app.get("/api/geo-review/queue")
+def get_geo_review_queue(request: Request, limit: int = 50, _=Depends(require_api_key), db=Depends(get_db)):
+    enforce_rate_limit(request)
+    limit = max(1, min(limit, 200))
+    cursor = db.cursor()
+    cursor.execute(
+        """
+        SELECT id, post_id, raw_location_text, status, suggested_district_id, reviewer, notes, created_at
+        FROM geo_review_queue
+        WHERE status = 'PENDING_REVIEW'
+        ORDER BY created_at DESC
+        LIMIT %s
+        """,
+        (limit,)
+    )
+    return cursor.fetchall()
 
 if __name__ == "__main__":
     import uvicorn

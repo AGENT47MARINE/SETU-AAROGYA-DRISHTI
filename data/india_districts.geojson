@@ -1,0 +1,38 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "DISTRICT": "Bhopal",
+        "STATE": "Madhya Pradesh"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[77.3, 23.2], [77.5, 23.2], [77.5, 23.4], [77.3, 23.4], [77.3, 23.2]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "DISTRICT": "Mumbai",
+        "STATE": "Maharashtra"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[72.75, 18.88], [72.99, 18.88], [72.99, 19.3], [72.75, 19.3], [72.75, 18.88]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "DISTRICT": "Bengaluru Urban",
+        "STATE": "Karnataka"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[77.45, 12.85], [77.8, 12.85], [77.8, 13.2], [77.45, 13.2], [77.45, 12.85]]]
+      }
+    }
+  ]
+}

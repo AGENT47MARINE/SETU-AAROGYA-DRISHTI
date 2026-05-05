@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     decision        VARCHAR(30),
     decision_notes  TEXT
 );
+CREATE INDEX IF NOT EXISTS alerts_status_created_idx ON alerts (status, created_at DESC);
 
 -- Immutable audit log
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -95,6 +96,22 @@ CREATE TABLE IF NOT EXISTS audit_log (
     actor           VARCHAR(100),
     action          VARCHAR(50),
     payload_hash    VARCHAR(64),
+    prev_hash       VARCHAR(64),
+    chain_hash      VARCHAR(64),
     blockchain_txid VARCHAR(200),
     created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS audit_log_created_idx ON audit_log (created_at DESC);
+
+-- Queue of unresolved geo mappings for manual review
+CREATE TABLE IF NOT EXISTS geo_review_queue (
+    id              UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    post_id         UUID,
+    raw_location_text TEXT,
+    status          VARCHAR(30) DEFAULT 'PENDING_REVIEW',
+    suggested_district_id INTEGER REFERENCES districts(id),
+    reviewer        VARCHAR(100),
+    notes           TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    reviewed_at     TIMESTAMPTZ
 );
