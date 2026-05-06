@@ -1,82 +1,236 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import axios from 'axios';
-import { Activity, AlertTriangle, Shield, Map as MapIcon, RefreshCw, Bell } from 'lucide-react';
+import { Activity, AlertTriangle, RefreshCw, Bell, ClipboardCheck, FlaskConical } from 'lucide-react';
 import L from 'leaflet';
 
-// Fix for Leaflet default icon
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 
-let DefaultIcon = L.icon({
-    iconUrl: markerIcon,
-    shadowUrl: markerShadow,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41]
+const DefaultIcon = L.icon({
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41]
 });
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api";
-const API_KEY = import.meta.env.VITE_SETU_API_KEY || "";
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api';
+const API_KEY = import.meta.env.VITE_SETU_API_KEY || '';
+const BASE_POLL_MS = 5000;
+const MAX_BACKOFF_MS = 60000;
 
 function App() {
   const [signals, setSignals] = useState([]);
   const [hotspots, setHotspots] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [stats, setStats] = useState({ total_signals: 0, entity_breakdown: [] });
-  const [loading, setLoading] = useState(true);
+  const [advanced, setAdvanced] = useState({ summary: { adr_signals: 0, temporal_spikes: 0 }, alerts: [] });
+  const [triageQueue, setTriageQueue] = useState([]);
+  const [decisionBusy, setDecisionBusy] = useState({});
+  const [decisionMessage, setDecisionMessage] = useState('');
+  const [error, setError] = useState('');
 
-  const fetchData = async () => {
+  const pollTimeoutRef = useRef(null);
+  const consecutive429Ref = useRef(0);
+  const fetchInFlightRef = useRef(false);
+  const isMountedRef = useRef(false);
+
+  const authHeaders = API_KEY ? { 'x-api-key': API_KEY } : {};
+
+  const fetchData = useCallback(async () => {
+    if (fetchInFlightRef.current) {
+      return { ok: false, retryDelay: BASE_POLL_MS };
+    }
+
+    fetchInFlightRef.current = true;
     try {
-      const [signalsRes, statsRes, hotspotsRes, alertsRes] = await Promise.all([
-        axios.get(`${API_BASE}/signals`, { headers: API_KEY ? { "x-api-key": API_KEY } : {} }),
-        axios.get(`${API_BASE}/stats`, { headers: API_KEY ? { "x-api-key": API_KEY } : {} }),
-        axios.get(`${API_BASE}/hotspots`, { headers: API_KEY ? { "x-api-key": API_KEY } : {} }),
-        axios.get(`${API_BASE}/alerts`, { headers: API_KEY ? { "x-api-key": API_KEY } : {} })
+      const [signalsRes, statsRes, hotspotsRes, alertsRes, advancedRes, triageRes] = await Promise.all([
+        axios.get(`${API_BASE}/signals`, { headers: authHeaders }),
+        axios.get(`${API_BASE}/stats`, { headers: authHeaders }),
+        axios.get(`${API_BASE}/hotspots`, { headers: authHeaders }),
+        axios.get(`${API_BASE}/alerts`, { headers: authHeaders }),
+        axios.get(`${API_BASE}/stats/advanced`, { headers: authHeaders }),
+        axios.get(`${API_BASE}/triage/queue`, { headers: authHeaders })
       ]);
+
       setSignals(signalsRes.data);
       setStats(statsRes.data);
       setHotspots(hotspotsRes.data);
       setAlerts(alertsRes.data);
-      setLoading(false);
+      setAdvanced(advancedRes.data || { summary: { adr_signals: 0, temporal_spikes: 0 }, alerts: [] });
+      setTriageQueue(triageRes.data || []);
+      consecutive429Ref.current = 0;
+      setError('');
+      return { ok: true, retryDelay: BASE_POLL_MS };
     } catch (err) {
-      console.error("Fetch error:", err);
+      console.error('Fetch error:', err);
+      const status = err?.response?.status;
+      if (status === 429) {
+        consecutive429Ref.current += 1;
+        const retryDelay = Math.min(BASE_POLL_MS * (2 ** consecutive429Ref.current), MAX_BACKOFF_MS);
+        setError(`Rate limited by API (429). Retrying in ${Math.round(retryDelay / 1000)}s.`);
+        return { ok: false, retryDelay };
+      }
+
+      setError('Live fetch failed. Check API key or backend health.');
+      return { ok: false, retryDelay: BASE_POLL_MS };
+    } finally {
+      fetchInFlightRef.current = false;
+    }
+  }, [authHeaders]);
+
+  const clearPollTimer = useCallback(() => {
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleNextPoll = useCallback((delayMs) => {
+    if (!isMountedRef.current || document.visibilityState !== 'visible') {
+      return;
+    }
+
+    clearPollTimer();
+    pollTimeoutRef.current = setTimeout(async () => {
+      const result = await fetchData();
+      scheduleNextPoll(result.retryDelay);
+    }, delayMs);
+  }, [clearPollTimer, fetchData]);
+
+  const submitDecision = async (alertId, decision) => {
+    setDecisionBusy((prev) => ({ ...prev, [alertId]: true }));
+    setDecisionMessage('');
+    try {
+      await axios.post(
+        `${API_BASE}/triage/${alertId}/decision`,
+        {
+          decision,
+          reviewer: 'dashboard_reviewer',
+          notes: `Decision from dashboard: ${decision}`
+        },
+        { headers: authHeaders }
+      );
+      setDecisionMessage(`Decision submitted: ${decision}`);
+      const result = await fetchData();
+      scheduleNextPoll(result.retryDelay);
+    } catch (err) {
+      console.error('Decision error:', err);
+      setDecisionMessage('Failed to submit decision.');
+    } finally {
+      setDecisionBusy((prev) => ({ ...prev, [alertId]: false }));
     }
   };
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    isMountedRef.current = true;
+
+    const startPolling = async () => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      const result = await fetchData();
+      scheduleNextPoll(result.retryDelay);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        clearPollTimer();
+        return;
+      }
+      startPolling();
+    };
+
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMountedRef.current = false;
+      clearPollTimer();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [clearPollTimer, fetchData, scheduleNextPoll]);
 
   return (
     <div className="dashboard-container">
-      <header>
+      <header className="topbar">
         <div className="logo">SETU AAROGYA DRISHTI</div>
-        <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-          <div style={{ color: 'var(--primary)', fontWeight: 'bold' }}>
-            <Activity size={16} style={{ marginRight: 8 }} />
+        <div className="topbar-actions">
+          <div className="kpi-pill">
+            <Activity size={16} />
             {stats.total_signals} SIGNALS DETECTED
           </div>
-          <button onClick={fetchData} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
+          <button
+            className="icon-button"
+            onClick={async () => {
+              const result = await fetchData();
+              scheduleNextPoll(result.retryDelay);
+            }}
+            aria-label="Refresh dashboard"
+          >
             <RefreshCw size={20} />
           </button>
         </div>
       </header>
 
       <div className="sidebar">
-        {/* Alerts Section */}
+        {error && (
+          <div className="card danger-card">
+            <strong>Connection Warning</strong>
+            <div style={{ fontSize: '0.85rem' }}>{error}</div>
+          </div>
+        )}
+
+        <div className="card stats-card">
+          <h3 className="section-title">
+            <FlaskConical size={18} />
+            Advanced Stats
+          </h3>
+          <div className="compact-row">
+            <span>ADR Signals</span>
+            <strong>{advanced.summary?.adr_signals || 0}</strong>
+          </div>
+          <div className="compact-row">
+            <span>Temporal Spikes</span>
+            <strong>{advanced.summary?.temporal_spikes || 0}</strong>
+          </div>
+        </div>
+
+        <div className="section-block">
+          <h3 className="section-title">
+            <ClipboardCheck size={18} />
+            Triage Queue
+          </h3>
+          {decisionMessage && <div className="decision-message">{decisionMessage}</div>}
+          <div className="triage-list">
+            {triageQueue.length === 0 && <div className="signal-meta">No pending triage items.</div>}
+            {triageQueue.slice(0, 6).map((item) => (
+              <div key={item.id} className="card triage-card">
+                <div className="triage-headline">
+                  <strong>{item.alert_type}</strong> {' '}•{' '} {item.severity}
+                </div>
+                <div className="signal-meta">{new Date(item.created_at).toLocaleString()}</div>
+                <div className="triage-actions">
+                  <button disabled={!!decisionBusy[item.id]} onClick={() => submitDecision(item.id, 'CONFIRMED')}>Confirm</button>
+                  <button disabled={!!decisionBusy[item.id]} onClick={() => submitDecision(item.id, 'MORE_DATA')}>More Data</button>
+                  <button disabled={!!decisionBusy[item.id]} onClick={() => submitDecision(item.id, 'REJECTED')}>Reject</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {alerts.length > 0 && (
-          <div style={{ marginBottom: '2rem' }}>
-            <h3 style={{ color: 'var(--danger)', display: 'flex', alignItems: 'center', fontSize: '1rem' }}>
-              <Bell size={18} style={{ marginRight: 8 }} />
+          <div className="section-block">
+            <h3 className="section-title danger-title">
+              <Bell size={18} />
               Active Alerts
             </h3>
             {alerts.map((alert, i) => (
-              <div key={i} className="card" style={{ border: '1px solid var(--danger)', background: 'rgba(255, 75, 43, 0.1)' }}>
+              <div key={i} className="card alert-card">
                 <strong style={{ color: 'var(--danger)' }}>{alert.type}</strong>
                 <div style={{ fontSize: '0.8rem' }}>{alert.count} cases of {alert.entity} detected in District {alert.district_id}</div>
               </div>
@@ -84,17 +238,17 @@ function App() {
           </div>
         )}
 
-        <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center' }}>
-          <AlertTriangle size={20} style={{ marginRight: 10, color: 'var(--primary)' }} />
+        <h3 className="section-title">
+          <AlertTriangle size={20} />
           Live Signals
         </h3>
-        <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 300px)' }}>
-          {signals.map(signal => (
+        <div className="signals-scroll">
+          {signals.map((signal) => (
             <div key={signal.id} className="signal-item">
               <div className="signal-meta">
-                {signal.platform} • {new Date(signal.posted_at).toLocaleTimeString()}
+                {signal.platform} {' '}•{' '} {new Date(signal.posted_at).toLocaleTimeString()}
               </div>
-              <div style={{ fontSize: '0.85rem' }}>{signal.text_cleaned}</div>
+              <div className="signal-text">{signal.text_cleaned}</div>
               <div className="entities">
                 {signal.entities?.map((ent, i) => (
                   <span key={i} className="entity-tag">{ent.entity_text}</span>
@@ -109,18 +263,17 @@ function App() {
         <MapContainer center={[22.9734, 78.6569]} zoom={5} style={{ height: '100%', width: '100%' }}>
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; CARTO'
+            attribution="&copy; CARTO"
           />
-          {/* Individual Signal Markers */}
-          {signals.map(signal => (
+          {signals.map((signal) => (
             <Marker key={signal.id} position={[signal.lat || 23.2599, signal.lng || 77.4126]}>
               <Popup className="custom-popup">
-                <strong>{signal.platform} Signal</strong><br/>
+                <strong>{signal.platform} Signal</strong>
+                <br />
                 {signal.text_cleaned}
               </Popup>
             </Marker>
           ))}
-          {/* Heatmap/Hotspot Circles */}
           {hotspots
             .filter((spot) => spot?.center?.coordinates?.length >= 2)
             .map((spot, i) => {
@@ -140,7 +293,8 @@ function App() {
                   }}
                 >
                   <Popup>
-                    <strong>Hotspot Detected</strong><br/>
+                    <strong>Hotspot Detected</strong>
+                    <br />
                     {intensity} related signals in this area.
                   </Popup>
                 </Circle>
@@ -153,3 +307,4 @@ function App() {
 }
 
 export default App;
+
